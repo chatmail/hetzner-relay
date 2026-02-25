@@ -18,6 +18,22 @@ def main():
     ready = get_pool(hclient, label="ready")
     print("available servers:")
     [print(s.name) for s in ready]
+    vps = ready[0]
+    print(f"\nusing {vps.name} for deployment")
+
+    # set "deploying" label
+
+    # rsync repository to /root
+    # initenv.sh
+    # init
+    # run
+    # test
+
+    # set "successful" or "failed" label
+
+    # rebuild
+    # install dependencies
+    # set "ready" label
 
 
 if __name__ == "__main__":

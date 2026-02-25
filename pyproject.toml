@@ -1,0 +1,9 @@
+[project]
+name = "hetzner-relay"
+version = "0.1.0"
+description = "A script to get a VPS from hetzner and deploy a chatmail relay on it."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "hcloud",
+]

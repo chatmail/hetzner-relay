@@ -129,7 +129,14 @@ def main():
     ready = get_pool(hclient)
     print("+++ available servers:")
     [print(s.name) for s in ready]
-    vps = ready[0]
+    try:
+        vps = ready[0]
+    except IndexError:
+        while len(ready) < 1:
+            print("no servers available. Waiting 15 seconds...")
+            time.sleep(15)
+            ready = get_pool(hclient)
+        vps = ready[0]
     ipv4 = vps.public_net.ipv4.ip if not args.ssh_host else args.ssh_host
     print(f"\n+++ using {vps.name} for deployment\n")
 

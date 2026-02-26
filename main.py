@@ -29,7 +29,7 @@ def deploy(vps: hcloud.servers.client.BoundServer, ipv4: str):
         host=ipv4,
         user="root",
     )
-    #install_dependencies(ssh)
+    install_dependencies(ssh)
 
     command = "cd relay && scripts/initenv.sh"
     print("\n+++ " + command)
@@ -46,7 +46,53 @@ def deploy(vps: hcloud.servers.client.BoundServer, ipv4: str):
     ssh.close()  # SSH session needs to be re-opened so test_timezone_env doesn't fail
 
 
-def run_tests(vps: hcloud.servers.client.BoundServer, ipv4: str, domain2=""):
+def set_dns(ipv4: str, mail_domain: str, ns: str):
+    """Generate DNS zonefile and upload it to the authoritative NS"""
+    ssh = Connection(
+        host=ipv4,
+        user="root",
+    )
+
+    command = f"cd relay && scripts/cmdeploy dns --zonefile zone --ssh-host @local"
+    print("\n+++ " + command)
+    ssh.run(command)
+    
+    command = f"cat relay/zone"
+    print("\n+++ " + command)
+    result = ssh.run(command)
+
+    complete_zone = f"""
+$ORIGIN {mail_domain}.
+$TTL 300
+@ IN SOA ns.testrun.org. root.nine.testrun.org 2023010101 7200 3600 1209600 3600
+@ IN NS ns.testrun.org.
+@ IN A {ipv4}
+www IN CNAME {mail_domain}.
+mta-sts IN CNAME {mail_domain}.
+{result.stdout}
+"""
+
+    import pdb; pdb.set_trace()
+
+    ssh_ns = Connection(
+        host=ns,
+        user="root",
+    )
+    print(f"\n+++ Setting the following zonefile for {mail_domain} at {ns}:\n{complete_zone}")
+    command = ("echo '" + complete_zone + f"' > /etc/nsd/{mail_domain}.zone")
+    print(command)
+    ssh_ns.run(command)
+
+    command = f"nsd-checkzone {mail_domain} /etc/nsd/{mail_domain}.zone"
+    print("\n+++ " + command)
+    ssh_ns.run(command)
+    
+    command = "systemctl reload nsd"
+    print("\n+++ " + command)
+    ssh_ns.run(command)
+
+
+def run_tests(ipv4: str, domain2=""):
     ssh.open()
     if domain2:
         domain2 = "CHATMAIL_DOMAIN2=" + domain2
@@ -103,16 +149,20 @@ def main():
         help="path to the private SSH key you want to login with",
     )
     parser.add_argument(
+        "--test",
+        default=False,
+        action="store_true",
+        help="Test chatmail/relay on the allocated VPS. Implies --deploy",
+    )
+    parser.add_argument(
         "--deploy",
         default=False,
         action="store_true",
         help="Deploy chatmail/relay to the allocated VPS",
     )
     parser.add_argument(
-        "--test",
-        default=False,
-        action="store_true",
-        help="Test chatmail/relay on the allocated VPS. Implies --deploy",
+        "--dns-server",
+        help="Generate a DNS zonefile and deploy it to an authoritative name server, like ns.testrun.org. Implies --deploy",
     )
     parser.add_argument(
         "--keep",
@@ -122,6 +172,8 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.dns_server:
+        args.deploy = True
     if args.test:
         args.deploy = True
 
@@ -142,7 +194,7 @@ def main():
 
     if args.deploy:
         try:
-            print(f"+++ uploading relay repository from {relay_repo}")
+            print(f"+++ uploading relay repository from {args.relay_repo}")
             vps = vps.update(labels={"state":"deploying"})
             sysrsync.run(
                 source=args.relay_repo,
@@ -155,8 +207,10 @@ def main():
                 private_key=args.ssh_private_key,
             )
             deploy(vps, ipv4)
+            if args.dns_server:
+                set_dns(ipv4, vps.name, args.dns_server)
             if args.test:
-                run_tests(vps, ipv4, args.domain2)
+                run_tests(ipv4, args.domain2)
                 vps = vps.update(labels={"state":"successful"})
         except Exception as e:
             vps = vps.update(labels={"state":"failed"})

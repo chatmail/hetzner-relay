@@ -46,6 +46,15 @@ def deploy(vps: hcloud.servers.client.BoundServer, ipv4: str):
     ssh.close()  # SSH session needs to be re-opened so test_timezone_env doesn't fail
 
 
+def clean_zone(zone: str) -> str:
+    """From a zonefile, remove the line with the CAA record."""
+    result = []
+    for line in zone.splitlines():
+        if not "CAA" in line:
+            result.append(line)
+    return ''.join(result)
+
+
 def set_dns(ipv4: str, mail_domain: str, ns: str):
     """Generate DNS zonefile and upload it to the authoritative NS"""
     ssh = Connection(
@@ -71,13 +80,14 @@ www IN CNAME {mail_domain}.
 mta-sts IN CNAME {mail_domain}.
 {result.stdout}
 """
+    cleaned_zone = clean_zone(complete_zone)
 
     ssh_ns = Connection(
         host=ns,
         user="root",
     )
-    print(f"\n+++ Setting the following zonefile for {mail_domain} at {ns}:\n{complete_zone}")
-    command = ("echo '" + complete_zone + f"' > /etc/nsd/{mail_domain}.zone")
+    print(f"\n+++ Setting the zonefile for {mail_domain} at {ns}")
+    command = ("echo '" + cleaned_zone + f"' > /etc/nsd/{mail_domain}.zone")
     print(command)
     ssh_ns.run(command)
 

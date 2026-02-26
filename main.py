@@ -72,8 +72,6 @@ mta-sts IN CNAME {mail_domain}.
 {result.stdout}
 """
 
-    import pdb; pdb.set_trace()
-
     ssh_ns = Connection(
         host=ns,
         user="root",
@@ -90,10 +88,15 @@ mta-sts IN CNAME {mail_domain}.
     command = "systemctl reload nsd"
     print("\n+++ " + command)
     ssh_ns.run(command)
+    ssh_ns.close()
+    ssh.close()
 
 
 def run_tests(ipv4: str, domain2=""):
-    ssh.open()
+    ssh = Connection(
+        host=ipv4,
+        user="root",
+    )
     if domain2:
         domain2 = "CHATMAIL_DOMAIN2=" + domain2
     command = f"cd relay && {domain2} scripts/cmdeploy test --ssh-host @local --slow"
@@ -102,10 +105,33 @@ def run_tests(ipv4: str, domain2=""):
     ssh.close()
 
 
-def rebuild_vps(ipv4: str, vps: hcloud.servers.client.BoundServer):
+def rebuild_vps(ipv4: str, vps: hcloud.servers.client.BoundServer, args):
     """Rebuilds a VPS after a finished CI run."""
+    for path in ["/etc/dkimkeys", "/var/lib/acme"]:
+        print(f"\n+++ downloading {path} to /tmp")
+        directory = "/" + path.split("/")[-1]
+        sysrsync.run(
+            source=path,
+            destination="/tmp/pool-state" + directory,
+            source_ssh="root@" + ipv4,
+            options=["-rlp", "--mkpath"],
+            sync_source_contents=True,
+            strict_host_key_checking=False,
+            private_key=args.ssh_private_key,
+        )
+        if args.dns_server:
+            upload_path = "/var/lib/pool-state/" + vps.name + directory
+            print(f"\n+++ uploading {path} to {args.dns_server}:{upload_path}")
+            sysrsync.run(
+                source="/tmp/pool-state" + directory,
+                destination=upload_path,
+                destination_ssh="root@" + args.dns_server,
+                options=["-rlp", "--mkpath"],
+                sync_source_contents=True,
+                strict_host_key_checking=False,
+                private_key=args.ssh_private_key,
+            )
     print("\n+++ rebuilding VPS")
-    # XXX download /var/lib/acme and /etc/dkimkeys
     vps.rebuild(image=hcloud.images.Image("debian-12"))
     time.sleep(10)
 
@@ -116,7 +142,33 @@ def rebuild_vps(ipv4: str, vps: hcloud.servers.client.BoundServer):
         user="root",
         connect_timeout = 180  # wait until VPS is rebuilt
     )
-    # XXX re-upload /var/lib/acme and /etc/dkimkeys
+
+    for path in ["/etc/dkimkeys", "/var/lib/acme"]:
+        print(f"\n+++ uploading cached {path}")
+        directory = "/" + path.split("/")[-1]
+        if args.dns_server:
+            cache_path = "/var/lib/pool-state/" + vps.name + directory
+            print(f"\n+++ downloading {cache_path} from {args.dns_server} to /tmp")
+            sysrsync.run(
+                source=cache_path,
+                destination="/tmp/pool-state" + directory,
+                source_ssh="root@" + args.dns_server,
+                options=["-rlp", "--mkpath"],
+                sync_source_contents=True,
+                strict_host_key_checking=False,
+                private_key=args.ssh_private_key,
+            )
+        print(f"\n+++ uploading to {path}")
+        sysrsync.run(
+            source="/tmp/pool-state" + directory,
+            destination=path,
+            destination_ssh="root@" + ipv4,
+            options=["-rlp", "--mkpath"],
+            sync_source_contents=True,
+            strict_host_key_checking=False,
+            private_key=args.ssh_private_key,
+        )
+
     install_dependencies(ssh)
 
 
@@ -216,7 +268,7 @@ def main():
             vps = vps.update(labels={"state":"failed"})
             raise e
     if not args.keep:
-        rebuild_vps(ipv4, vps)
+        rebuild_vps(ipv4, vps, args)
         vps = vps.update(labels={"state":"ready"})
 
 

@@ -8,7 +8,9 @@ so it can be reused for another deployment.
 ## Usage
 
 ```
+git clone https://github.com/chatmail/relay
 git clone https://github.com/chatmail/hetzner-relay
 cd hetzner-relay
-uv run main.py
+export HETZNER_API_TOKEN=<token>
+uv run main.py ../relay
 ```

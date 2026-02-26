@@ -1,3 +1,4 @@
+import argparse
 from fabric.connection import Connection
 import hcloud
 import os
@@ -22,7 +23,7 @@ def install_dependencies(ssh):
     ssh.run(command)
 
 
-def test_and_deploy(vps: hcloud.servers.client.BoundServer, ipv4: str, domain2=""):
+def deploy(vps: hcloud.servers.client.BoundServer, ipv4: str):
     """Deploys a chatmail relay via SSH and runs tests."""
     ssh = Connection(
         host=ipv4,
@@ -43,7 +44,12 @@ def test_and_deploy(vps: hcloud.servers.client.BoundServer, ipv4: str, domain2="
     ssh.run(command)
 
     ssh.close()  # SSH session needs to be re-opened so test_timezone_env doesn't fail
+
+
+def run_tests(vps: hcloud.servers.client.BoundServer, ipv4: str, domain2=""):
     ssh.open()
+    if domain2:
+        domain2 = "CHATMAIL_DOMAIN2=" + domain2
     command = f"cd relay && {domain2} scripts/cmdeploy test --ssh-host @local --slow"
     print("\n+++ " + command)
     ssh.run(command)
@@ -69,40 +75,88 @@ def rebuild_vps(ipv4: str, vps: hcloud.servers.client.BoundServer):
 
 
 def main():
-    relay_repo = os.environ.get("RELAY_REPO", "../relay")
-    domain2 = "CHATMAIL_DOMAIN2=" + os.environ.get("CHATMAIL_DOMAIN2", "ci-chatmail.testrun.org")
-    ssh_private_keyfile = os.environ.get("SSH_PRIVATE_KEYFILE", "~/.ssh/staging.testrun.org")
-    hetzner_api_token = os.environ.get("HETZNER_API_TOKEN")
-    hclient = hcloud.Client(token=hetzner_api_token)
+    """Get a ready VPS from a Hetzner project and deploy chatmail/relay to it."""
 
+    parser = argparse.ArgumentParser(description=main.__doc__)
+    parser.add_argument(
+        "relay_repo",
+        help="path to your local chatmail/relay repository",
+    )
+    parser.add_argument(
+        "--hetzner-api-token",
+        default=os.environ.get("HETZNER_API_TOKEN"),
+        help="path to your local chatmail/relay repository",
+    )
+    parser.add_argument(
+        "--domain2",
+        default=os.environ.get("CHATMAIL_DOMAIN2", "ci-chatmail.testrun.org"),
+        help="a second chatmail domain to run test against",
+    )
+    parser.add_argument(
+        "--ssh-host",
+        default=None,
+        help="the SSH host you want to connect to",
+    )
+    parser.add_argument(
+        "-i", "--ssh-private-key",
+        default=os.environ.get("SSH_PRIVATE_KEYFILE", "~/.ssh/staging.testrun.org"),
+        help="path to the private SSH key you want to login with",
+    )
+    parser.add_argument(
+        "--deploy",
+        default=False,
+        action="store_true",
+        help="Deploy chatmail/relay to the allocated VPS",
+    )
+    parser.add_argument(
+        "--test",
+        default=False,
+        action="store_true",
+        help="Test chatmail/relay on the allocated VPS. Implies --deploy",
+    )
+    parser.add_argument(
+        "--keep",
+        default=False,
+        action="store_true",
+        help="Don't rebuild the VPS after a successful test",
+    )
+    args = parser.parse_args()
+
+    if args.test:
+        args.deploy = True
+
+    hclient = hcloud.Client(token=args.hetzner_api_token)
     ready = get_pool(hclient)
     print("+++ available servers:")
     [print(s.name) for s in ready]
     vps = ready[0]
-    ipv4 = vps.public_net.ipv4.ip
+    ipv4 = vps.public_net.ipv4.ip if not args.ssh_host else args.ssh_host
     print(f"\n+++ using {vps.name} for deployment\n")
 
-    try:
-        print(f"+++ uploading relay repository from {relay_repo}")
-        vps = vps.update(labels={"state":"deploying"})
-        sysrsync.run(
-            source=relay_repo,
-            destination="/root/relay",
-            exclusions=[".tox", "venv"],
-            destination_ssh="root@" + ipv4,
-            options=["-r"],
-            sync_source_contents=True,
-            strict_host_key_checking=False,
-            private_key=ssh_private_keyfile,
-        )
-
-        test_and_deploy(vps, ipv4, domain2)
-        vps = vps.update(labels={"state":"successful"})
+    if args.deploy:
+        try:
+            print(f"+++ uploading relay repository from {relay_repo}")
+            vps = vps.update(labels={"state":"deploying"})
+            sysrsync.run(
+                source=args.relay_repo,
+                destination="/root/relay",
+                exclusions=[".tox", "venv"],
+                destination_ssh="root@" + ipv4,
+                options=["-r"],
+                sync_source_contents=True,
+                strict_host_key_checking=False,
+                private_key=args.ssh_private_key,
+            )
+            deploy(vps, ipv4)
+            if args.test:
+                run_tests(vps, ipv4, args.domain2)
+                vps = vps.update(labels={"state":"successful"})
+        except Exception as e:
+            vps = vps.update(labels={"state":"failed"})
+            raise e
+    if not args.keep:
         rebuild_vps(ipv4, vps)
         vps = vps.update(labels={"state":"ready"})
-    except Exception as e:
-        vps = vps.update(labels={"state":"failed"})
-        raise e
 
 
 if __name__ == "__main__":

@@ -6,9 +6,11 @@ import sysrsync
 import time
 
 
-def get_pool(hclient: hcloud.Client, label="ready") -> [hcloud.servers.client.BoundServer]:
+def get_pool(hclient: hcloud.Client, label="ready", name=None) -> [hcloud.servers.client.BoundServer]:
     servers = []
     for server in hclient.servers.get_all():
+        if name == server.name:
+            return [server]
         if server.labels.get("state") == label:
             servers.append(server)
     return servers
@@ -150,8 +152,9 @@ def rebuild_vps(ipv4: str, vps: hcloud.servers.client.BoundServer, args):
     ssh = Connection(
         host=ipv4,
         user="root",
-        connect_timeout = 180  # wait until VPS is rebuilt
+        connect_timeout = 180
     )
+    ssh.run("uptime")  # wait until VPS is rebuilt
 
     for path in ["/etc/dkimkeys", "/var/lib/acme"]:
         print(f"\n+++ uploading cached {path}")
@@ -245,7 +248,7 @@ def main():
         args.deploy = True
 
     hclient = hcloud.Client(token=args.hetzner_api_token)
-    ready = get_pool(hclient)
+    ready = get_pool(hclient, name=args.vps)
     print("+++ available servers:")
     [print(s.name) for s in ready]
     try:

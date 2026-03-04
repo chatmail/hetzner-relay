@@ -52,7 +52,7 @@ def clean_zone(zone: str) -> str:
     for line in zone.splitlines():
         if not "CAA" in line:
             result.append(line)
-    return ''.join(result)
+    return '\n'.join(result)
 
 
 def set_dns(ipv4: str, mail_domain: str, ns: str):
@@ -73,7 +73,7 @@ def set_dns(ipv4: str, mail_domain: str, ns: str):
     complete_zone = f"""
 $ORIGIN {mail_domain}.
 $TTL 300
-@ IN SOA ns.testrun.org. root.nine.testrun.org 2023010101 7200 3600 1209600 3600
+@ IN SOA ns.testrun.org. root.nine.testrun.org {int(time.time())} 7200 3600 1209600 3600
 @ IN NS ns.testrun.org.
 @ IN A {ipv4}
 www IN CNAME {mail_domain}.

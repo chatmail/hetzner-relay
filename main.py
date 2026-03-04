@@ -196,6 +196,11 @@ def main():
         help="path to your local chatmail/relay repository",
     )
     parser.add_argument(
+        "--vps",
+        default="",
+        help="the name of a hetzner VPS to use",
+    )
+    parser.add_argument(
         "--domain2",
         default=os.environ.get("CHATMAIL_DOMAIN2", "ci-chatmail.testrun.org"),
         help="a second chatmail domain to run test against",
@@ -245,13 +250,22 @@ def main():
     [print(s.name) for s in ready]
     try:
         vps = ready[0]
+        for ready_vps in ready:
+            if args.vps in ready_vps.name:
+                vps = ready_vps
     except IndexError:
         while len(ready) < 1:
             print("no servers available. Waiting 15 seconds...")
             time.sleep(15)
             ready = get_pool(hclient)
         vps = ready[0]
+        for ready_vps in ready:
+            if args.vps in ready_vps.name:
+                vps = ready_vps
     ipv4 = vps.public_net.ipv4.ip if not args.ssh_host else args.ssh_host
+    if args.vps:
+        if args.vps != vps.name:
+            print(f"WARNING: {args.vps} not available.")
     print(f"\n+++ using {vps.name} for deployment\n")
 
     if args.deploy:
@@ -280,6 +294,8 @@ def main():
     if not args.keep:
         rebuild_vps(ipv4, vps, args)
         vps = vps.update(labels={"state":"ready"})
+    with open("/tmp/pool-target", "w") as f:
+        f.write(vps.name)
 
 
 if __name__ == "__main__":

@@ -44,7 +44,7 @@ def get_pool(hclient: hcloud.Client, label="ready", name=None) -> [hcloud.server
 
     :param hclient: the Hetzner client object
     :param label: the label to filter for
-    :param name: part of the name attribute of a Hetzner VPS
+    :param name: the exact name attribute of a Hetzner VPS
     :return: the VPS object
     """
     servers = []
@@ -97,8 +97,13 @@ def clean_zone(zone: str) -> str:
     return '\n'.join(result)
 
 
-def set_dns(ipv4: str, mail_domain: str, ns: str):
-    """Generate DNS zonefile and upload it to the authoritative NS"""
+def set_dns(ipv4: str, mail_domain: str, dns_server: str):
+    """Generate DNS zonefile and upload it to the authoritative DNS server
+
+    :param ipv4: the IPv4 address of the chatmail relay
+    :param mail_domain: the mail_domain of the chatmail relay
+    :param dns_server: the authoritative DNS server which hosts the relay's records
+    """
     ssh = Connection(
         host=ipv4,
         user="root",
@@ -124,23 +129,23 @@ mta-sts IN CNAME {mail_domain}.
 """
     cleaned_zone = clean_zone(complete_zone)
 
-    ssh_ns = Connection(
-        host=ns,
+    ssh_dns = Connection(
+        host=dns_server,
         user="root",
     )
-    print(f"\n+++ Setting the zonefile for {mail_domain} at {ns}")
+    print(f"\n+++ Setting the zonefile for {mail_domain} at {dns_server}")
     command = ("echo '" + cleaned_zone + f"' > /etc/nsd/{mail_domain}.zone")
     print(command)
-    ssh_ns.run(command)
+    ssh_dns.run(command)
 
     command = f"nsd-checkzone {mail_domain} /etc/nsd/{mail_domain}.zone"
     print("\n+++ " + command)
-    ssh_ns.run(command)
+    ssh_dns.run(command)
     
     command = "systemctl reload nsd"
     print("\n+++ " + command)
-    ssh_ns.run(command)
-    ssh_ns.close()
+    ssh_dns.run(command)
+    ssh_dns.close()
     ssh.close()
 
 
@@ -166,11 +171,11 @@ def pull_cached_state(ipv4: str, vps: hcloud.servers.client.BoundServer, ssh_pri
     :param cache_server: a server where we can store the directories between rebuilds
     """
     for path in ["/etc/dkimkeys", "/var/lib/acme"]:
-        print(f"\n+++ downloading {path} to /tmp")
         directory = "/" + path.split("/")[-1]
+        print(f"\n+++ downloading {path} to /tmp/pool-state/{vps.name}{directory}")
         sysrsync.run(
             source=path,
-            destination="/tmp/pool-state" + directory,
+            destination="/tmp/pool-state/" + vps.name + directory,
             source_ssh="root@" + ipv4,
             options=["-rlp", "--mkpath"],
             sync_source_contents=True,
@@ -181,7 +186,7 @@ def pull_cached_state(ipv4: str, vps: hcloud.servers.client.BoundServer, ssh_pri
             upload_path = "/var/lib/pool-state/" + vps.name + directory
             print(f"+++++ uploading {path} to {cache_server}:{upload_path}")
             sysrsync.run(
-                source="/tmp/pool-state" + directory,
+                source="/tmp/pool-state/" + vps.name + directory,
                 destination=upload_path,
                 destination_ssh="root@" + cache_server,
                 options=["-rlp", "--mkpath"],
@@ -204,10 +209,10 @@ def push_cached_state(ipv4: str, vps: hcloud.servers.client.BoundServer, ssh_pri
         directory = "/" + path.split("/")[-1]
         if cache_server:
             cache_path = "/var/lib/pool-state/" + vps.name + directory
-            print(f"+++++ downloading {cache_path} from {cache_server} to /tmp")
+            print(f"+++++ downloading {cache_path} from {cache_server} to /tmp/pool-state/{vps.name}{directory}")
             sysrsync.run(
                 source=cache_path,
-                destination="/tmp/pool-state" + directory,
+                destination="/tmp/pool-state/" + vps.name + directory,
                 source_ssh="root@" + cache_server,
                 options=["-rlp", "--mkpath"],
                 sync_source_contents=True,
@@ -216,7 +221,7 @@ def push_cached_state(ipv4: str, vps: hcloud.servers.client.BoundServer, ssh_pri
             )
         print(f"+++++ uploading to {path}")
         sysrsync.run(
-            source="/tmp/pool-state" + directory,
+            source="/tmp/pool-state/" + vps.name + directory,
             destination=path,
             destination_ssh="root@" + ipv4,
             options=["-rlp", "--mkpath"],
@@ -270,7 +275,7 @@ def main():
     parser.add_argument(
         "--hetzner-api-token",
         default=os.environ.get("HETZNER_API_TOKEN"),
-        help="path to your local chatmail/relay repository",
+        help="the API token to a Hetzner console project",
     )
     parser.add_argument(
         "--run-id",
@@ -311,18 +316,20 @@ def main():
         help="Deploy chatmail/relay to the allocated VPS",
     )
     parser.add_argument(
-        "--dns-server",
+        "--dns",
+        const="ns.testrun.org",
+        nargs="?",
         help="Generate a DNS zonefile and deploy it to an authoritative name server, like ns.testrun.org. Implies --deploy",
     )
     parser.add_argument(
-        "--keep",
+        "--rebuild",
         default=False,
         action="store_true",
-        help="Don't rebuild the VPS after a successful test",
+        help="Rebuild the VPS after a successful test",
     )
     args = parser.parse_args()
 
-    if args.dns_server:
+    if args.dns:
         args.deploy = True
     if args.test:
         args.deploy = True
@@ -355,16 +362,16 @@ def main():
                 private_key=args.ssh_private_key,
             )
             deploy(vps, ipv4)
-            if args.dns_server:
-                set_dns(ipv4, vps.name, args.dns_server)
+            if args.dns:
+                set_dns(ipv4, vps.name, args.dns)
             if args.test:
                 run_tests(ipv4, args.domain2)
                 vps = vps.update(labels={"state":"successful"})
         except Exception as e:
             vps = vps.update(labels={"state":"failed"})
             raise e
-    if not args.keep:
-        rebuild_vps(ipv4, vps, args.ssh_private_key, args.dns_server)
+    if args.rebuild:
+        rebuild_vps(ipv4, vps, args.ssh_private_key, args.dns)
         vps = vps.update(labels={"state":"ready"})
     with open("/tmp/pool-target", "w") as f:
         f.write(vps.name)
@@ -372,4 +379,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

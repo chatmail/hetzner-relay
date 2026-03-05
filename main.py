@@ -179,7 +179,7 @@ def pull_cached_state(ipv4: str, vps: hcloud.servers.client.BoundServer, ssh_pri
         )
         if cache_server:
             upload_path = "/var/lib/pool-state/" + vps.name + directory
-            print(f"\n+++ uploading {path} to {cache_server}:{upload_path}")
+            print(f"+++++ uploading {path} to {cache_server}:{upload_path}")
             sysrsync.run(
                 source="/tmp/pool-state" + directory,
                 destination=upload_path,

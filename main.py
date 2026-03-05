@@ -1,18 +1,56 @@
 import argparse
 from fabric.connection import Connection
 import hcloud
+import hcloud.servers.client
 import os
+import socket
 import sysrsync
 import time
 
 
+def allocate_vps(hclient: hcloud.Client, vps_name: str, run_id: str) -> hcloud.servers.client.BoundServer:
+    """Allocate a VPS from a Hetzner pool
+
+    :param hclient: the Hetzner client object
+    :param vps_name: part of the name attribute of the VPS the user wants to use
+    :param run_id: the UID of this run
+    :return: the VPS object
+    """
+    ready = get_pool(hclient, name=vps_name)
+    print("+++ available servers:")
+    [print(s.name) for s in ready]
+    try:
+        vps = ready[0]
+        for ready_vps in ready:
+            if vps_name in ready_vps.name:
+                vps = ready_vps
+    except IndexError:
+        while len(ready) < 1:
+            print("no servers available. Waiting 15 seconds...")
+            time.sleep(15)
+            ready = get_pool(hclient)
+        vps = ready[0]
+        for ready_vps in ready:
+            if vps_name in ready_vps.name:
+                vps = ready_vps
+    vps = vps.update(labels={"state": "deploying", "run": run_id})
+    return vps
+
+
 def get_pool(hclient: hcloud.Client, label="ready", name=None) -> [hcloud.servers.client.BoundServer]:
+    """Get a VPS by label from a Hetzner project, or a very specific VPS by name (even if it isn't ready).
+
+    :param hclient: the Hetzner client object
+    :param label: the label to filter for
+    :param name: part of the name attribute of a Hetzner VPS
+    :return: the VPS object
+    """
     servers = []
-    for server in hclient.servers.get_all():
-        if name == server.name:
-            return [server]
-        if server.labels.get("state") == label:
-            servers.append(server)
+    for vps in hclient.servers.get_all():
+        if name == vps.name:
+            return [vps]
+        if vps.labels.get("state") == label:
+            servers.append(vps)
     return servers
 
 
@@ -199,7 +237,13 @@ def main():
         help="path to your local chatmail/relay repository",
     )
     parser.add_argument(
+        "--run-id",
+        default=socket.gethostname(),
+        help="a unique ID for the CI run, to lock a specific VPS for your usage.",
+    )
+    parser.add_argument(
         "--vps",
+        dest="vps_name",
         default="",
         help="the name of a hetzner VPS to use",
     )
@@ -248,33 +292,22 @@ def main():
         args.deploy = True
 
     hclient = hcloud.Client(token=args.hetzner_api_token)
-    ready = get_pool(hclient, name=args.vps)
-    print("+++ available servers:")
-    [print(s.name) for s in ready]
-    try:
-        vps = ready[0]
-        for ready_vps in ready:
-            if args.vps in ready_vps.name:
-                vps = ready_vps
-    except IndexError:
-        while len(ready) < 1:
-            print("no servers available. Waiting 15 seconds...")
-            time.sleep(15)
-            ready = get_pool(hclient)
-        vps = ready[0]
-        for ready_vps in ready:
-            if args.vps in ready_vps.name:
-                vps = ready_vps
-    ipv4 = vps.public_net.ipv4.ip if not args.ssh_host else args.ssh_host
-    if args.vps:
-        if args.vps != vps.name:
-            print(f"WARNING: {args.vps} not available.")
+    vps = allocate_vps(hclient, args.vps_name, args.run_id)
+    vps = hclient.servers.get_by_id(vps.id)
+    while vps.labels.get("run") != args.run_id:
+        # Lost the race — retry with a different server
+        vps = allocate_vps(hclient, args.vps_name, args.run_id)
+        vps = hclient.servers.get_by_id(vps.id)
+
+    if args.vps_name:
+        if args.vps_name != vps.name:
+            print(f"WARNING: {args.vps_name} not available.")
     print(f"\n+++ using {vps.name} for deployment\n")
+    ipv4 = vps.public_net.ipv4.ip if not args.ssh_host else args.ssh_host
 
     if args.deploy:
         try:
             print(f"+++ uploading relay repository from {args.relay_repo}")
-            vps = vps.update(labels={"state":"deploying"})
             sysrsync.run(
                 source=args.relay_repo,
                 destination="/root/relay",

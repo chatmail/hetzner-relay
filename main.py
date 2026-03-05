@@ -1,10 +1,12 @@
 import argparse
 from fabric.connection import Connection
 import hcloud
+import hcloud.images
 import hcloud.servers.client
 import os
 import socket
 import sysrsync
+import sysrsync.exceptions
 import time
 
 
@@ -155,8 +157,14 @@ def run_tests(ipv4: str, domain2=""):
     ssh.close()
 
 
-def rebuild_vps(ipv4: str, vps: hcloud.servers.client.BoundServer, args):
-    """Rebuilds a VPS after a finished CI run."""
+def pull_cached_state(ipv4: str, vps: hcloud.servers.client.BoundServer, ssh_private_key: str, cache_server: str):
+    """Store /etc/dkimkeys and /var/lib/acme, either locally or on the --dns-server.
+
+    :param ipv4: the IPv4 address of the VPS
+    :param vps: the VPS object
+    :param ssh_private_key: the SSH private key which can login to the VPS
+    :param cache_server: a server where we can store the directories between rebuilds
+    """
     for path in ["/etc/dkimkeys", "/var/lib/acme"]:
         print(f"\n+++ downloading {path} to /tmp")
         directory = "/" + path.split("/")[-1]
@@ -167,49 +175,46 @@ def rebuild_vps(ipv4: str, vps: hcloud.servers.client.BoundServer, args):
             options=["-rlp", "--mkpath"],
             sync_source_contents=True,
             strict_host_key_checking=False,
-            private_key=args.ssh_private_key,
+            private_key=ssh_private_key,
         )
-        if args.dns_server:
+        if cache_server:
             upload_path = "/var/lib/pool-state/" + vps.name + directory
-            print(f"\n+++ uploading {path} to {args.dns_server}:{upload_path}")
+            print(f"\n+++ uploading {path} to {cache_server}:{upload_path}")
             sysrsync.run(
                 source="/tmp/pool-state" + directory,
                 destination=upload_path,
-                destination_ssh="root@" + args.dns_server,
+                destination_ssh="root@" + cache_server,
                 options=["-rlp", "--mkpath"],
                 sync_source_contents=True,
                 strict_host_key_checking=False,
-                private_key=args.ssh_private_key,
+                private_key=ssh_private_key,
             )
-    print("\n+++ rebuilding VPS")
-    vps.rebuild(image=hcloud.images.Image("debian-12"))
-    time.sleep(10)
 
-    print(f"\n+++ resetting SSH Host Key for {ipv4}")
-    os.system(f"ssh-keygen -R {ipv4}")
-    ssh = Connection(
-        host=ipv4,
-        user="root",
-        connect_timeout = 180
-    )
-    ssh.run("uptime")  # wait until VPS is rebuilt
 
+def push_cached_state(ipv4: str, vps: hcloud.servers.client.BoundServer, ssh_private_key: str, cache_server: str):
+    """Store /etc/dkimkeys and /var/lib/acme, either locally or on the --dns-server.
+
+    :param ipv4: the IPv4 address of the VPS
+    :param vps: the VPS object
+    :param ssh_private_key: the SSH private key which can login to the VPS
+    :param cache_server: a server where we can store the directories between rebuilds
+    """
     for path in ["/etc/dkimkeys", "/var/lib/acme"]:
         print(f"\n+++ uploading cached {path}")
         directory = "/" + path.split("/")[-1]
-        if args.dns_server:
+        if cache_server:
             cache_path = "/var/lib/pool-state/" + vps.name + directory
-            print(f"\n+++ downloading {cache_path} from {args.dns_server} to /tmp")
+            print(f"+++++ downloading {cache_path} from {cache_server} to /tmp")
             sysrsync.run(
                 source=cache_path,
                 destination="/tmp/pool-state" + directory,
-                source_ssh="root@" + args.dns_server,
+                source_ssh="root@" + cache_server,
                 options=["-rlp", "--mkpath"],
                 sync_source_contents=True,
                 strict_host_key_checking=False,
-                private_key=args.ssh_private_key,
+                private_key=ssh_private_key,
             )
-        print(f"\n+++ uploading to {path}")
+        print(f"+++++ uploading to {path}")
         sysrsync.run(
             source="/tmp/pool-state" + directory,
             destination=path,
@@ -217,9 +222,40 @@ def rebuild_vps(ipv4: str, vps: hcloud.servers.client.BoundServer, args):
             options=["-rlp", "--mkpath"],
             sync_source_contents=True,
             strict_host_key_checking=False,
-            private_key=args.ssh_private_key,
+            private_key=ssh_private_key,
         )
 
+
+def rebuild_vps(ipv4: str, vps: hcloud.servers.client.BoundServer, ssh_private_key: str, cache_server: str):
+    """Rebuilds a VPS after a finished CI run, caches some state between rebuilds if possible.
+
+    :param ipv4: the IPv4 address of the VPS
+    :param vps: the VPS object
+    :param ssh_private_key: the SSH private key which can login to the VPS
+    :param cache_server: a server where we can store the directories between rebuilds
+    """
+    try:
+        pull_cached_state(ipv4, vps, ssh_private_key, cache_server)
+    except sysrsync.exceptions.RsyncError:
+        print("WARNING: could not download /etc/dkimkeys and /var/lib/acme to cache")
+
+    print("\n+++ rebuilding VPS")
+    vps.rebuild(image=hcloud.images.Image(name="debian-12"))
+    time.sleep(10)
+
+    print(f"\n+++ resetting SSH Host Key for {ipv4}")
+    os.system(f"ssh-keygen -R {ipv4}")
+    ssh = Connection(
+        host=ipv4,
+        user="root",
+        connect_timeout = 300
+    )
+    print("\n+++ wait until host is rebuilt")
+    ssh.run("uptime")  # wait until VPS is rebuilt
+    try:
+        push_cached_state(ipv4, vps, ssh_private_key, cache_server)
+    except sysrsync.exceptions.RsyncError:
+        print("WARNING: could not upload /etc/dkimkeys and /var/lib/acme from cache")
     install_dependencies(ssh)
 
 
@@ -328,7 +364,7 @@ def main():
             vps = vps.update(labels={"state":"failed"})
             raise e
     if not args.keep:
-        rebuild_vps(ipv4, vps, args)
+        rebuild_vps(ipv4, vps, args.ssh_private_key, args.dns_server)
         vps = vps.update(labels={"state":"ready"})
     with open("/tmp/pool-target", "w") as f:
         f.write(vps.name)

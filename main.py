@@ -1,4 +1,6 @@
 import argparse
+from logging import exception
+
 from fabric.connection import Connection
 import hcloud
 import hcloud.images
@@ -348,6 +350,7 @@ def main():
     print(f"\n+++ using {vps.name} for deployment\n")
     ipv4 = vps.public_net.ipv4.ip if not args.ssh_host else args.ssh_host
 
+    exc = None
     if args.deploy:
         try:
             print(f"+++ uploading relay repository from {args.relay_repo}")
@@ -369,12 +372,14 @@ def main():
                 vps = vps.update(labels={"state":"successful"})
         except Exception as e:
             vps = vps.update(labels={"state":"failed"})
-            raise e
+            exc = e
     if args.rebuild:
         rebuild_vps(ipv4, vps, args.ssh_private_key, args.dns)
         vps = vps.update(labels={"state":"ready"})
     with open("/tmp/pool-target", "w") as f:
         f.write(vps.name)
+    if exc:
+        raise exc
 
 
 if __name__ == "__main__":

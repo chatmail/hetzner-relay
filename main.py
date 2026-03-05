@@ -274,6 +274,33 @@ def main():
         "relay_repo",
         help="path to your local chatmail/relay repository",
     )
+
+    parser.add_argument(
+        "--deploy",
+        default=False,
+        action="store_true",
+        help="Deploy chatmail/relay to the allocated VPS",
+    )
+    parser.add_argument(
+        "--test",
+        default=False,
+        action="store_true",
+        help="Test chatmail/relay on the allocated VPS. Implies --deploy",
+    )
+    parser.add_argument(
+        "--dns",
+        metavar="ns.testrun.org",
+        const="ns.testrun.org",
+        nargs="?",
+        help="Generate a DNS zonefile and deploy it to an authoritative name server, like ns.testrun.org. Implies --deploy",
+    )
+    parser.add_argument(
+        "--rebuild",
+        default=False,
+        action="store_true",
+        help="Rebuild the VPS after a successful test",
+    )
+
     parser.add_argument(
         "--hetzner-api-token",
         default=os.environ.get("HETZNER_API_TOKEN"),
@@ -290,44 +317,23 @@ def main():
         default="",
         help="the name of a hetzner VPS to use",
     )
+
     parser.add_argument(
-        "--domain2",
-        default=os.environ.get("CHATMAIL_DOMAIN2", "ci-chatmail.testrun.org"),
-        help="a second chatmail domain to run test against",
+        "-i", "--ssh-private-key",
+        metavar="PATH",
+        default=os.environ.get("SSH_PRIVATE_KEYFILE", "~/.ssh/staging.testrun.org"),
+        help="path to the private SSH key you want to login with",
     )
     parser.add_argument(
         "--ssh-host",
         default=None,
         help="the SSH host you want to connect to",
     )
+
     parser.add_argument(
-        "-i", "--ssh-private-key",
-        default=os.environ.get("SSH_PRIVATE_KEYFILE", "~/.ssh/staging.testrun.org"),
-        help="path to the private SSH key you want to login with",
-    )
-    parser.add_argument(
-        "--test",
-        default=False,
-        action="store_true",
-        help="Test chatmail/relay on the allocated VPS. Implies --deploy",
-    )
-    parser.add_argument(
-        "--deploy",
-        default=False,
-        action="store_true",
-        help="Deploy chatmail/relay to the allocated VPS",
-    )
-    parser.add_argument(
-        "--dns",
-        const="ns.testrun.org",
-        nargs="?",
-        help="Generate a DNS zonefile and deploy it to an authoritative name server, like ns.testrun.org. Implies --deploy",
-    )
-    parser.add_argument(
-        "--rebuild",
-        default=False,
-        action="store_true",
-        help="Rebuild the VPS after a successful test",
+        "--domain2",
+        default=os.environ.get("CHATMAIL_DOMAIN2", "ci-chatmail.testrun.org"),
+        help="a second chatmail domain to run test against",
     )
     args = parser.parse_args()
 

@@ -1,5 +1,8 @@
 name: Allocate Hetzner VPS
 
+on:
+  workflow_call:
+
 jobs:
   allocate:
     name: Allocate VPS from Hetzner Pool

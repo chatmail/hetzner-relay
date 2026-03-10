@@ -1,12 +1,15 @@
 name: Rebuild Hetzner VPS
 
+on:
+  workflow_call:
+    inputs:
+      vps_name:
+        description: the name of a Hetzner VPS, MUST be named after its domain name.
+
 jobs:
   rebuild:
     name: Rebuild VPS from Hetzner Pool
     runs-on: ubuntu-latest
-    inputs:
-      vps_name:
-        description: the name of a Hetzner VPS, MUST be named after its domain name.
     steps:
       - uses: actions/checkout@v3
       - run: pip install .

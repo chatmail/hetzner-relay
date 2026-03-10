@@ -4,7 +4,9 @@ jobs:
   rebuild:
     name: Rebuild VPS from Hetzner Pool
     runs-on: ubuntu-latest
-    needs: allocate
+    inputs:
+      vps_name:
+        description: the name of a Hetzner VPS, MUST be named after its domain name.
     steps:
       - uses: actions/checkout@v3
       - run: pip install .
@@ -12,4 +14,4 @@ jobs:
           mkdir ~/.ssh
           echo "${{ secrets.STAGING_SSH_KEY }}" >> ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          python3 main.py --hetzner-api-token ${{ secrets.HETZNER_API_TOKEN }} --rebuild --run-id $GITHUB_RUN_ID --vps ${{ needs.allocate.outputs.vps_name }}
+          python3 main.py --hetzner-api-token ${{ secrets.HETZNER_API_TOKEN }} --rebuild --run-id $GITHUB_RUN_ID --vps ${{ inputs.vps_name }}

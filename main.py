@@ -83,6 +83,10 @@ def deploy(vps: hcloud.servers.client.BoundServer, ipv4: str):
     print("\n+++ " + command)
     ssh.run(command)
 
+    command = "sed -i 's/#\s*mtail_address/mtail_address/' chatmail.ini"
+    print("\n+++ " + command)
+    ssh.run(command)
+
     command = f"cd relay && scripts/cmdeploy run --ssh-host @local"
     print("\n+++ " + command)
     ssh.run(command)

@@ -1,0 +1,14 @@
+name: Allocate Hetzner VPS
+
+jobs:
+  allocate:
+    name: Allocate VPS from Hetzner Pool
+    runs-on: ubuntu-latest
+    outputs:
+      vps: ${{ steps.vps_name.outputs.vps_name }}
+    steps:
+      - uses: actions/checkout@v3
+      - run: pip install .
+      - run: python3 main.py --hetzner-api-token ${{ secrets.HETZNER_API_TOKEN }} --run-id $GITHUB_RUN_ID
+      - id: vps_name
+        run: echo "vps_name=$(cat /tmp/pool-target)" >> "$GITHUB_OUTPUT"

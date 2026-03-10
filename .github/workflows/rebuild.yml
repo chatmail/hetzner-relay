@@ -5,10 +5,11 @@ on:
     inputs:
       vps_name:
         description: the name of a Hetzner VPS, MUST be named after its domain name.
+        required: true
+        type: string
 
 jobs:
   rebuild:
-    name: Rebuild VPS from Hetzner Pool
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3

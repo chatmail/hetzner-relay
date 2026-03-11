@@ -66,11 +66,17 @@ def install_dependencies(ssh):
     ssh.run(command)
 
 
-def deploy(vps: hcloud.servers.client.BoundServer, ipv4: str):
-    """Deploys a chatmail relay via SSH and runs tests."""
+def deploy(vps: hcloud.servers.client.BoundServer, ipv4: str, ssh_args: dict):
+    """Deploys a chatmail relay via SSH and runs tests.
+
+    :param vps: the Hetzner VPS object
+    :param ipv4: the IP address of the VPS
+    :param ssh_args: a dictionary with kwargs for paramiko.client.SSHClient.connect
+    """
     ssh = Connection(
         host=ipv4,
         user="root",
+        connect_kwargs=ssh_args,
     )
     install_dependencies(ssh)
 
@@ -102,16 +108,18 @@ def clean_zone(zone: str) -> str:
     return '\n'.join(result)
 
 
-def set_dns(ipv4: str, mail_domain: str, dns_server: str):
+def set_dns(ipv4: str, mail_domain: str, dns_server: str, ssh_args: dict):
     """Generate DNS zonefile and upload it to the authoritative DNS server
 
     :param ipv4: the IPv4 address of the chatmail relay
     :param mail_domain: the mail_domain of the chatmail relay
     :param dns_server: the authoritative DNS server which hosts the relay's records
+    :param ssh_args: a dictionary with kwargs for paramiko.client.SSHClient.connect
     """
     ssh = Connection(
         host=ipv4,
         user="root",
+        connect_kwargs=ssh_args,
     )
 
     command = f"cd relay && scripts/cmdeploy dns --zonefile zone --ssh-host @local"
@@ -154,10 +162,17 @@ mta-sts IN CNAME {mail_domain}.
     ssh.close()
 
 
-def run_tests(ipv4: str, domain2=""):
+def run_tests(ipv4: str, ssh_args: dict, domain2=""):
+    """Run tests on the chatmail relay
+
+    :param ipv4: the IP address of the VPS
+    :param ssh_args: a dictionary with kwargs for paramiko.client.SSHClient.connect
+    :param domain2: the mail_domain of a second chatmail relay to test against
+    """
     ssh = Connection(
         host=ipv4,
         user="root",
+        connect_kwargs=ssh_args,
     )
     if domain2:
         domain2 = "CHATMAIL_DOMAIN2=" + domain2
@@ -258,7 +273,8 @@ def rebuild_vps(ipv4: str, vps: hcloud.servers.client.BoundServer, ssh_private_k
     ssh = Connection(
         host=ipv4,
         user="root",
-        connect_timeout = 300
+        connect_timeout = 300,
+        connect_kwargs={"key_filename": ssh_private_key} if ssh_private_key else {},
     )
     print("\n+++ wait until host is rebuilt")
     ssh.run("uptime")  # wait until VPS is rebuilt
@@ -344,6 +360,7 @@ def main():
         args.deploy = True
     if args.test:
         args.deploy = True
+    ssh_args = dict(key_filename=args.ssh_private_key) if args.ssh_private_key else {}
 
     step = "Allocating relay"
     print(f"\n============== {step} ===============")
@@ -377,15 +394,15 @@ def main():
                 strict_host_key_checking=False,
                 private_key=args.ssh_private_key,
             )
-            deploy(vps, ipv4)
+            deploy(vps, ipv4, ssh_args)
             if args.dns:
                 step = "Setting DNS records"
                 print(f"\n============== {step} ===============")
-                set_dns(ipv4, vps.name, args.dns)
+                set_dns(ipv4, vps.name, args.dns, ssh_args)
             if args.test:
                 step = "Running tests"
                 print(f"\n============== {step} ===============")
-                run_tests(ipv4, args.domain2)
+                run_tests(ipv4, args.domain2, ssh_args)
                 vps = vps.update(labels={"state":"successful"})
         except Exception as e:
             print(f"\n============= {step} failed: {type(e).__name__} ==============")

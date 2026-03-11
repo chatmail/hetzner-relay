@@ -1,6 +1,4 @@
 import argparse
-from logging import exception
-
 from fabric.connection import Connection
 import hcloud
 import hcloud.images
@@ -10,6 +8,7 @@ import socket
 import sysrsync
 import sysrsync.exceptions
 import time
+import traceback
 
 
 def allocate_vps(hclient: hcloud.Client, vps_name: str, run_id: str) -> hcloud.servers.client.BoundServer:
@@ -346,6 +345,8 @@ def main():
     if args.test:
         args.deploy = True
 
+    step = "Allocating relay"
+    print(f"\n============== {step} ===============")
     hclient = hcloud.Client(token=args.hetzner_api_token)
     vps = allocate_vps(hclient, args.vps_name, args.run_id)
     vps = hclient.servers.get_by_id(vps.id)
@@ -363,6 +364,8 @@ def main():
     exc = None
     if args.deploy:
         try:
+            step = "Deploying relay"
+            print(f"\n============== {step} ===============")
             print(f"+++ uploading relay repository from {args.relay_repo}")
             sysrsync.run(
                 source=args.relay_repo,
@@ -376,19 +379,28 @@ def main():
             )
             deploy(vps, ipv4)
             if args.dns:
+                step = "Setting DNS records"
+                print(f"\n============== {step} ===============")
                 set_dns(ipv4, vps.name, args.dns)
             if args.test:
+                step = "Running tests"
+                print(f"\n============== {step} ===============")
                 run_tests(ipv4, args.domain2)
                 vps = vps.update(labels={"state":"successful"})
         except Exception as e:
+            print(f"\n============= {step} failed: {type(e).__name__} ==============")
+            traceback.print_exc()
             vps = vps.update(labels={"state":"failed"})
             exc = e
     if args.rebuild:
+        print("\n============== Rebuilding VPS ===============")
         rebuild_vps(ipv4, vps, args.ssh_private_key, args.dns)
         vps = vps.update(labels={"state":"ready"})
+        print("\n+++ Rebuilding VPS finished.")
     with open("/tmp/pool-target", "w") as f:
         f.write(vps.name)
     if exc:
+        print(f"\n============= {step} failed with {type(exc).__name__}, see context above ==============")
         raise exc
 
 

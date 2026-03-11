@@ -341,7 +341,6 @@ def main():
     parser.add_argument(
         "-i", "--ssh-private-key",
         metavar="PATH",
-        default=os.environ.get("SSH_PRIVATE_KEYFILE", "~/.ssh/staging.testrun.org"),
         help="path to the private SSH key you want to login with",
     )
     parser.add_argument(
@@ -361,6 +360,8 @@ def main():
         args.deploy = True
     if args.test:
         args.deploy = True
+    if args.ssh_private_key.startswith("~"):
+        args.ssh_private_key = args.ssh_private_key.replace("~", os.environ.get("HOME"))
     ssh_args = dict(key_filename=args.ssh_private_key) if args.ssh_private_key else {}
 
     step = "Allocating relay"

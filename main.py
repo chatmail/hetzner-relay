@@ -403,7 +403,7 @@ def main():
             if args.test:
                 step = "Running tests"
                 print(f"\n============== {step} ===============")
-                run_tests(ipv4, args.domain2, ssh_args)
+                run_tests(ipv4, ssh_args, args.domain2)
                 vps = vps.update(labels={"state":"successful"})
         except Exception as e:
             print(f"\n============= {step} failed: {type(e).__name__} ==============")

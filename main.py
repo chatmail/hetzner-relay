@@ -145,6 +145,7 @@ mta-sts IN CNAME {mail_domain}.
     ssh_dns = Connection(
         host=dns_server,
         user="root",
+        connect_kwargs=ssh_args,
     )
     print(f"\n+++ Setting the zonefile for {mail_domain} at {dns_server}")
     command = ("echo '" + cleaned_zone + f"' > /etc/nsd/{mail_domain}.zone")

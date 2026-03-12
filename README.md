@@ -12,8 +12,9 @@ so it can be reused for another deployment.
 git clone https://github.com/chatmail/relay
 git clone https://github.com/chatmail/hetzner-relay
 cd hetzner-relay
+uv pip install -e .
 export HETZNER_API_TOKEN=<token>
-uv run main.py ../relay --test --rebuild
+uv run hetzner-relay ../relay --test --rebuild
 ```
 
 ### Usage

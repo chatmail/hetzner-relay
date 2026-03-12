@@ -279,6 +279,7 @@ def rebuild_vps(ipv4: str, vps: hcloud.servers.client.BoundServer, ssh_private_k
     )
     print("\n+++ wait until host is rebuilt")
     ssh.run("uptime")  # wait until VPS is rebuilt
+    vps = vps.update(labels={"state":"ready"})
     try:
         push_cached_state(ipv4, vps, ssh_private_key, cache_server)
     except sysrsync.exceptions.RsyncError:
@@ -341,6 +342,7 @@ def main():
     parser.add_argument(
         "-i", "--ssh-private-key",
         metavar="PATH",
+        default="",
         help="path to the private SSH key you want to login with",
     )
     parser.add_argument(
@@ -349,6 +351,12 @@ def main():
         help="the SSH host you want to connect to",
     )
 
+    parser.add_argument(
+        "--ipv4only",
+        default=False,
+        action="store_true",
+        help="Deploy with IPv4 address, not domain",
+    )
     parser.add_argument(
         "--domain2",
         default=os.environ.get("CHATMAIL_DOMAIN2", "ci-chatmail.testrun.org"),
@@ -379,6 +387,8 @@ def main():
             print(f"WARNING: {args.vps_name} not available.")
     print(f"\n+++ using {vps.name} for deployment\n")
     ipv4 = vps.public_net.ipv4.ip if not args.ssh_host else args.ssh_host
+    if args.ipv4only:
+        vps.name = ipv4
 
     exc = None
     if args.deploy:
@@ -414,7 +424,6 @@ def main():
     if args.rebuild:
         print("\n============== Rebuilding VPS ===============")
         rebuild_vps(ipv4, vps, args.ssh_private_key, args.dns)
-        vps = vps.update(labels={"state":"ready"})
         print("\n+++ Rebuilding VPS finished.")
     with open("/tmp/pool-target", "w") as f:
         f.write(vps.name)

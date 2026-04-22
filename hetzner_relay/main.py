@@ -177,7 +177,7 @@ def run_tests(ipv4: str, ssh_args: dict, domain2=""):
     )
     if domain2:
         domain2 = "CHATMAIL_DOMAIN2=" + domain2
-    command = f"cd relay && {domain2} scripts/cmdeploy test --ssh-host @local --slow"
+    command = f"cd relay && {domain2} scripts/cmdeploy test --ssh-host @local"
     print("\n+++ " + command)
     ssh.run(command)
     ssh.close()
